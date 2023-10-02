@@ -102,14 +102,14 @@ int main() {
         cout << size << ' ' << number_of_detections[size] << ' ' << stride_at_first_detection[size] << endl;
         cout << possible_associativity[size] << endl;
         cout << "======" << endl;
-        if (cnt.size() >= ACCEPTANCE_THRESHOLD) {
-            int associativity = possible_associativity[size];
-            int cacheline_size = stride_at_first_detection[size];
-            cout << "Cache size = " << size << endl;
-            cout << "Cache associativity = " << associativity << endl;
-            cout << "Cacheline size = " << cacheline_size << endl;
-            //return 0;
-        }
+        // if (cnt.size() >= ACCEPTANCE_THRESHOLD) {
+        //     int associativity = possible_associativity[size];
+        //     int cacheline_size = stride_at_first_detection[size];
+        //     cout << "Cache size = " << size << endl;
+        //     cout << "Cache associativity = " << associativity << endl;
+        //     cout << "Cacheline size = " << cacheline_size << endl;
+        //     return 0;
+        // }
     }
     cout << "Failed to determine cache characteristics. Please, try again" << endl;
     return 1;

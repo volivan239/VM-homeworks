@@ -7,21 +7,16 @@
 
 using namespace std;
 
-const int MEM_SIZE = 1 << 25;
+const int MEM_SIZE = 1 << 22;
 const int MIN_CACHE_SIZE = 4 * 1024;
 const int MAX_CACHE_SIZE = 256 * 1024;
 const int MAX_ASSOCIATIVITY = 64;
+const int MIN_CACHELINE_SIZE = 8;
 const int ACCEPTANCE_THRESHOLD = 4;
 const long double JUMP_THRESHOLD = 1.15;
 int ptr[MEM_SIZE];
 
 mt19937 rnd(239);
-
-void fill_with_stride(int stride) {
-    for (int i = 0; i < MEM_SIZE; i++) {
-        ptr[i] = max(0, i - stride);
-    }
-}
 
 void fill_with_k_parallel_lines(int spots, int raw_stride) {
     int stride = raw_stride / sizeof(int);
@@ -38,7 +33,7 @@ void fill_with_k_parallel_lines(int spots, int raw_stride) {
             ptr[i] = i + stride * (perm[no_in_group + 1] - perm[no_in_group]);
         } else {
             int pos_in_line = i % stride;
-            if (pos_in_line != stride - 1) {
+            if (pos_in_line + 1 < stride) {
                 ptr[i] = i - stride * perm[no_in_group] + 1;
             } else {
                 int no_of_block = i / (stride * spots);
@@ -48,11 +43,51 @@ void fill_with_k_parallel_lines(int spots, int raw_stride) {
     }
 }
 
-void walk_all() {
-    // int cnt = 0;
+void fill_chess_like(int raw_stride, int raw_cachesize) {
+    int stride = raw_stride / sizeof(int);
+    int cachesize = raw_cachesize / sizeof(int);
+    int no_of_lines = cachesize / stride;
+    vector <int> perm(no_of_lines);
+    vector <int> inv(no_of_lines);
+    iota(perm.begin(), perm.end(), 0);
+
+    for (int i = 0; i < MEM_SIZE; i++) {
+        if (i % (2 * cachesize) == 0) {
+            shuffle(perm.begin() + 1, perm.end(), rnd);
+            for (int i = 0; i < no_of_lines; i++) {
+                inv[perm[i]] = i;
+            }
+        }
+        int no_in_group = inv[(i / stride) % no_of_lines];
+        if ((i / cachesize) % 2 != perm[no_in_group] % 2) {
+            // i-th cell is unreachable
+            continue;
+        }
+        if (no_in_group + 1 < no_of_lines) {
+            ptr[i] = i + stride * (perm[no_in_group + 1] - perm[no_in_group]);
+            if (perm[no_in_group + 1] % 2 == 1 && perm[no_in_group] % 2 == 0) {
+                ptr[i] += cachesize;
+            } else if (perm[no_in_group + 1] % 2 == 0 && perm[no_in_group] % 2 == 1) {
+                ptr[i] -= cachesize;
+            }
+        } else {
+            int pos_in_line = i % stride;
+            if (pos_in_line + 1 < stride) {
+                ptr[i] = (2 * cachesize) * (i / (2 * cachesize)) + pos_in_line + 1;
+            } else {
+                ptr[i] = (2 * cachesize) * (i / (2 * cachesize) + 1);
+            }
+        }
+    }
+}
+
+long long walk_and_measure_time() {
+    const auto start = chrono::high_resolution_clock::now(); 
+    int cnt = 0;
     for (int pos = 0; pos < MEM_SIZE; pos = ptr[pos]);
-    //cout << cnt << endl;
-    //exit(0);
+    const auto end = chrono::high_resolution_clock::now();
+
+    return chrono::duration_cast<chrono::nanoseconds>(end - start).count();
 }
 
 int main() {
@@ -60,7 +95,6 @@ int main() {
     map <int, int> number_of_detections;
     map <int, set <int>> spots_at_detections;
     map <int, int> possible_associativity;
-    map <int, int> stride_at_first_detection;
     for (int stride = 32; stride <= (1 << 18); stride *= 2) {
         long double avg_time_prev = -1;
         for (int spots = 2; spots * stride / sizeof(int) <= MEM_SIZE; spots *= 2) {
@@ -72,45 +106,49 @@ int main() {
                 break;
             }
 
-            //cout << "Currently processing stride = " << stride << "; spots = " << spots << endl;
             fill_with_k_parallel_lines(spots, stride);
-
-            const auto start = chrono::high_resolution_clock::now();
-            walk_all();
-            const auto end = chrono::high_resolution_clock::now();
-            
-            const auto duration = end - start;
-            auto nanoseconds = chrono::duration_cast<chrono::nanoseconds>(duration).count();
-            const long double avg_time = 1.0L * nanoseconds / MEM_SIZE;
+            long double avg_time = 1.0L * walk_and_measure_time() / MEM_SIZE;
             long double ratio = (avg_time_prev == -1) ? 0 : avg_time / avg_time_prev;
-            // cout << "stride = " << stride << "; number of spots = " << spots << "; avg time = " << avg_time << "; ratio = " << ratio << "\n";
             avg_time_prev = avg_time;
+
             if (ratio > JUMP_THRESHOLD) {
                 cout << "Find possible jump, detected size is " << expected_cache_size_if_jump << " spot is " << spots / 2 << " ratio is " << ratio << endl;
                 number_of_detections[expected_cache_size_if_jump]++;
                 spots_at_detections[expected_cache_size_if_jump].insert(spots / 2);
-                if (stride_at_first_detection.find(expected_cache_size_if_jump) == stride_at_first_detection.end()) {
-                    stride_at_first_detection[expected_cache_size_if_jump] = stride;
-                }
-                if (spots / 2 < MAX_ASSOCIATIVITY && spots_at_detections[expected_cache_size_if_jump / 2].find(spots / 2) != spots_at_detections[expected_cache_size_if_jump / 2].end() && spots_at_detections[expected_cache_size_if_jump / 2].find(spots / 4) == spots_at_detections[expected_cache_size_if_jump / 2].end()) {
+                if (spots / 2 < MAX_ASSOCIATIVITY && spots_at_detections[expected_cache_size_if_jump / 2].find(spots / 2) != spots_at_detections[expected_cache_size_if_jump / 2].end()) {// && spots_at_detections[expected_cache_size_if_jump / 2].find(spots / 4) == spots_at_detections[expected_cache_size_if_jump / 2].end()) {
                     possible_associativity[expected_cache_size_if_jump / 2] = spots / 2;
                 }
             }
         }
     }
+    int associativity = -1;
+    int cachesize = -1;
     for (auto [size, cnt] : spots_at_detections) {
-        cout << size << ' ' << number_of_detections[size] << ' ' << stride_at_first_detection[size] << endl;
-        cout << possible_associativity[size] << endl;
-        cout << "======" << endl;
-        // if (cnt.size() >= ACCEPTANCE_THRESHOLD) {
-        //     int associativity = possible_associativity[size];
-        //     int cacheline_size = stride_at_first_detection[size];
-        //     cout << "Cache size = " << size << endl;
-        //     cout << "Cache associativity = " << associativity << endl;
-        //     cout << "Cacheline size = " << cacheline_size << endl;
-        //     return 0;
-        // }
+        if (cnt.size() >= ACCEPTANCE_THRESHOLD) {
+            associativity = possible_associativity[size];
+            cachesize = size;
+            break;
+        }
     }
-    cout << "Failed to determine cache characteristics. Please, try again" << endl;
-    return 1;
+    if (cachesize == -1) {
+        cout << "Failed to determine cache characteristics. Please, try again" << endl;
+        return 1;
+    }
+    cout << "Cache size = " << cachesize << endl;
+    cout << "Associativity = " << associativity << endl;
+    long double avg_time_prev = -1;
+    for (int stride = MIN_CACHELINE_SIZE; stride < MAX_CACHE_SIZE; stride *= 2) {
+        fill_chess_like(stride, cachesize);
+        long double avg_time = 2.0L * walk_and_measure_time() / MEM_SIZE;
+        long double ratio = (avg_time_prev == -1) ? 0 : avg_time_prev / avg_time;
+        avg_time_prev = avg_time;
+
+        cout << stride << ' ' << avg_time << ' ' << ratio << endl;
+        if (ratio > JUMP_THRESHOLD) {
+            cout << "Cache line size = " << stride << endl;
+            return 0;
+        }
+    }
+    cout << "Failed to determine cache line size. Please, try again" << endl;
+    return 0;
 }

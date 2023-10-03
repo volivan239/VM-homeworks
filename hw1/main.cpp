@@ -7,22 +7,27 @@
 
 using namespace std;
 
-const int MEM_SIZE = 1 << 22;
-const int MIN_CACHE_SIZE = 4 * 1024;
+const int MEM_SIZE = 1 << 21;
+const int MIN_CACHE_SIZE = 8 * 1024;
 const int MAX_CACHE_SIZE = 256 * 1024;
 const int MAX_ASSOCIATIVITY = 64;
-const int MIN_CACHELINE_SIZE = 8;
+const int MIN_CACHELINE_SIZE = 16;
 const int ACCEPTANCE_THRESHOLD = 4;
-const long double JUMP_THRESHOLD = 1.15;
+const long double JUMP_THRESHOLD = 1.2;
+const long double JUMP_THRESHOLD_FOR_CACHE_LINE_SIZE = 1.12;
 int ptr[MEM_SIZE];
 
 mt19937 rnd(239);
+
+int fft_cmp(int a, int b) {
+    return b & (1 << __builtin_ctz(a ^ b));
+}
 
 void fill_with_k_parallel_lines(int spots, int raw_stride) {
     int stride = raw_stride / sizeof(int);
     vector <int> perm(spots);
     iota(perm.begin(), perm.end(), 0);
-    shuffle(perm.begin() + 1, perm.end(), rnd);
+    sort(perm.begin() + 1, perm.end(), fft_cmp);
     vector <int> inv(spots);
     for (int i = 0; i < spots; i++) {
         inv[perm[i]] = i;
@@ -50,12 +55,13 @@ void fill_chess_like(int raw_stride, int raw_cachesize) {
     vector <int> perm(no_of_lines);
     vector <int> inv(no_of_lines);
     iota(perm.begin(), perm.end(), 0);
+    sort(perm.begin(), perm.end(), fft_cmp);
 
     for (int i = 0; i < MEM_SIZE; i++) {
         if (i % (2 * cachesize) == 0) {
-            shuffle(perm.begin() + 1, perm.end(), rnd);
-            for (int i = 0; i < no_of_lines; i++) {
-                inv[perm[i]] = i;
+            //shuffle(perm.begin() + 1, perm.end(), rnd);
+            for (int j = 0; j < no_of_lines; j++) {
+                inv[perm[j]] = j;
             }
         }
         int no_in_group = inv[(i / stride) % no_of_lines];
@@ -95,7 +101,7 @@ int main() {
     map <int, int> number_of_detections;
     map <int, set <int>> spots_at_detections;
     map <int, int> possible_associativity;
-    for (int stride = 32; stride <= (1 << 18); stride *= 2) {
+    for (int stride = MIN_CACHELINE_SIZE; stride < MAX_CACHE_SIZE; stride *= 2) {
         long double avg_time_prev = -1;
         for (int spots = 2; spots * stride / sizeof(int) <= MEM_SIZE; spots *= 2) {
             int expected_cache_size_if_jump = (spots / 2) * stride;
@@ -144,7 +150,7 @@ int main() {
         avg_time_prev = avg_time;
 
         cout << stride << ' ' << avg_time << ' ' << ratio << endl;
-        if (ratio > JUMP_THRESHOLD) {
+        if (ratio > JUMP_THRESHOLD_FOR_CACHE_LINE_SIZE) {
             cout << "Cache line size = " << stride << endl;
             return 0;
         }

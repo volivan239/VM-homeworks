@@ -7,19 +7,23 @@
 
 using namespace std;
 
-const int MEM_SIZE = 1 << 21;
+const int MEM_SIZE = 1 << 23;
 const int MIN_CACHE_SIZE = 8 * 1024;
 const int MAX_CACHE_SIZE = 256 * 1024;
 const int MAX_ASSOCIATIVITY = 64;
 const int MIN_CACHELINE_SIZE = 16;
+const int MAX_CACHELINE_SIZE = 256;
 const int ACCEPTANCE_THRESHOLD = 4;
-const long double JUMP_THRESHOLD = 1.2;
+const long double JUMP_THRESHOLD = 1.25;
 const long double JUMP_THRESHOLD_FOR_CACHE_LINE_SIZE = 1.12;
 int ptr[MEM_SIZE];
 
 mt19937 rnd(239);
 
 int fft_cmp(int a, int b) {
+    if (a == b) {
+        return 0;
+    }
     return b & (1 << __builtin_ctz(a ^ b));
 }
 
@@ -55,7 +59,7 @@ void fill_chess_like(int raw_stride, int raw_cachesize) {
     vector <int> perm(no_of_lines);
     vector <int> inv(no_of_lines);
     iota(perm.begin(), perm.end(), 0);
-    sort(perm.begin(), perm.end(), fft_cmp);
+    sort(perm.begin() + 1, perm.end(), fft_cmp);
 
     for (int i = 0; i < MEM_SIZE; i++) {
         if (i % (2 * cachesize) == 0) {
@@ -118,7 +122,7 @@ int main() {
             avg_time_prev = avg_time;
 
             if (ratio > JUMP_THRESHOLD) {
-                cout << "Find possible jump, detected size is " << expected_cache_size_if_jump << " spot is " << spots / 2 << " ratio is " << ratio << endl;
+                //cout << "Find possible jump, detected size is " << expected_cache_size_if_jump << " spot is " << spots / 2 << " ratio is " << ratio << endl;
                 number_of_detections[expected_cache_size_if_jump]++;
                 spots_at_detections[expected_cache_size_if_jump].insert(spots / 2);
                 if (spots / 2 < MAX_ASSOCIATIVITY && spots_at_detections[expected_cache_size_if_jump / 2].find(spots / 2) != spots_at_detections[expected_cache_size_if_jump / 2].end()) {// && spots_at_detections[expected_cache_size_if_jump / 2].find(spots / 4) == spots_at_detections[expected_cache_size_if_jump / 2].end()) {
@@ -143,17 +147,17 @@ int main() {
     cout << "Cache size = " << cachesize << endl;
     cout << "Associativity = " << associativity << endl;
     long double avg_time_prev = -1;
-    for (int stride = MIN_CACHELINE_SIZE; stride < MAX_CACHE_SIZE; stride *= 2) {
+    for (int stride = 4 * MAX_CACHELINE_SIZE; stride >= MIN_CACHELINE_SIZE / 4; stride /= 2) {
         fill_chess_like(stride, cachesize);
         long double avg_time = 2.0L * walk_and_measure_time() / MEM_SIZE;
-        long double ratio = (avg_time_prev == -1) ? 0 : avg_time_prev / avg_time;
+        long double ratio = (avg_time_prev == -1) ? 0 : avg_time / avg_time_prev;
         avg_time_prev = avg_time;
 
         cout << stride << ' ' << avg_time << ' ' << ratio << endl;
-        if (ratio > JUMP_THRESHOLD_FOR_CACHE_LINE_SIZE) {
-            cout << "Cache line size = " << stride << endl;
-            return 0;
-        }
+        // if (ratio > JUMP_THRESHOLD_FOR_CACHE_LINE_SIZE) {
+        //     cout << "Cache line size = " << stride << endl;
+        //     return 0;
+        // }
     }
     cout << "Failed to determine cache line size. Please, try again" << endl;
     return 0;

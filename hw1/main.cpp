@@ -17,6 +17,7 @@ const int ACCEPTANCE_THRESHOLD = 4;
 const float JUMP_THRESHOLD = 1.25;
 const float JUMP_THRESHOLD_FOR_CACHE_LINE_SIZE = 1.12;
 int ptr[MEM_SIZE];
+int trash = 0;
 
 // Defines some deterministic but hard-to-predict order
 int fft_cmp(int a, int b) {
@@ -93,10 +94,12 @@ void generate_chess_pattern(int raw_stride, int raw_cachesize) {
 }
 
 long long walk_and_measure_time() {
+    trash = 0;
     const auto start = chrono::high_resolution_clock::now(); 
-    for (int pos = 0; pos < MEM_SIZE; pos = ptr[pos]);
+    for (int pos = 0; pos < MEM_SIZE; pos = ptr[pos]) trash += pos;
     const auto end = chrono::high_resolution_clock::now();
 
+    
     return chrono::duration_cast<chrono::nanoseconds>(end - start).count();
 }
 

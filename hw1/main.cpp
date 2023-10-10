@@ -14,7 +14,7 @@ const int MAX_ASSOCIATIVITY = 64;
 const int MIN_CACHELINE_SIZE = 16;
 const int MAX_CACHELINE_SIZE = 256;
 const int ACCEPTANCE_THRESHOLD = 4;
-const float JUMP_THRESHOLD = 1.3;
+const float JUMP_THRESHOLD = 1.25;
 const float JUMP_THRESHOLD_FOR_CACHE_LINE_SIZE = 1.12;
 int ptr[MEM_SIZE];
 

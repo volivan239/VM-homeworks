@@ -6,8 +6,24 @@ extern "C" {
   extern int Lread();
   extern int Lwrite(int);
   extern int Llength(void*);
+  extern void* Lstring (void *p);
   extern void* Bstring(void*);
   extern void* Belem (void *p, int i);
+  extern void* Bsta (void *v, int i, void *x);
+  extern void* Barray_my (int bn, int *data_);
+  extern void* Bsexp_my (int bn, int tag, int *data_);
+  extern int LtagHash (char *s);
+  extern int Btag (void *d, int t, int n);
+  extern int Barray_patt (void *d, int n);
+  extern void* Bclosure_my (int bn, void *entry, int *values);
+  extern void* Belem_link (void *p, int i);
+  extern int Bstring_patt (void *x, void *y);
+  extern int Bstring_tag_patt (void *x);
+  extern int Barray_tag_patt (void *x);
+  extern int Bsexp_tag_patt (void *x);
+  extern int Bunboxed_patt (void *x);
+  extern int Bboxed_patt (void *x);
+  extern int Bclosure_tag_patt (void *x);
 }
 
 interpreter::interpreter(bytefile *bf, int32_t *&stack_top, int32_t *&stack_bottom):
@@ -28,16 +44,16 @@ char* interpreter::next_str() {
   return bf->get_string(pos);
 }
 
-int32_t& interpreter::global(int32_t pos) {
-  return bf->global_ptr[pos];
+int32_t* interpreter::global(int32_t pos) {
+  return bf->global_ptr + pos;
 }
 
-int32_t& interpreter::get_by_location(char l, int32_t value) {
+int32_t* interpreter::get_by_location(char l, int32_t value) {
   switch (l) {
     case 0: return global(value);
     case 1: return stack.local(value);
     case 2: return stack.arg(value);
-    case 3: fprintf (stderr, "C(%d)", value); inst_decode_failure();
+    case 3: return stack.closure_binded(value);
     default: inst_decode_failure();
   }
 }
@@ -65,20 +81,24 @@ void interpreter::eval_drop() {
 void interpreter::eval_st(char l) {
   int32_t ind = next_int();
   int32_t value = stack.pop();
-  get_by_location(l, ind) = value;
+  *get_by_location(l, ind) = value;
   stack.push(value);
 }
 
 void interpreter::eval_ld(char l) {
   int32_t ind = next_int();
-  int32_t value = get_by_location(l, ind);
+  int32_t value = *get_by_location(l, ind);
   stack.push(value);
 }
 
 void interpreter::eval_begin() {
-  int nlocals = next_int();
   int nargs = next_int();
+  int nlocals = next_int();
   stack.prologue(nlocals, nargs);
+}
+
+void interpreter::eval_cbegin() {
+  eval_begin();
 }
 
 void interpreter::eval_read() {
@@ -113,9 +133,20 @@ void interpreter::eval_cjmp_z() {
 
 void interpreter::eval_call() {
   int32_t shift = next_int();
-  int32_t _ = next_int();
+  int32_t nargs = next_int();
+  stack.reverse(nargs, 0);
   stack.push(reinterpret_cast<int32_t>(ip));
+  stack.push(nargs);
   ip = bf->code_ptr + shift;
+}
+
+void interpreter::eval_callc() {
+  int32_t nargs = next_int();
+  char* callee = reinterpret_cast<char*>(Belem(reinterpret_cast<int32_t*>(stack.nth(nargs)), box(0)));
+  stack.reverse(nargs, 0);
+  stack.push(reinterpret_cast<int32_t>(ip));
+  stack.push(nargs + 1);
+  ip = callee;
 }
 
 void interpreter::eval_string() {
@@ -126,10 +157,116 @@ void interpreter::eval_length() {
   stack.push(Llength(reinterpret_cast<void*>(stack.pop())));
 }
 
+void interpreter::eval_sta() {
+  void *v = reinterpret_cast<void*>(stack.pop());
+  int32_t i = stack.pop();
+  void *x = reinterpret_cast<void*>(stack.pop());
+  stack.push(reinterpret_cast<int32_t>(Bsta(v, i, x)));
+}
+
 void interpreter::eval_elem() {
+  // std::cerr << "ELEM" << std::endl;
   int32_t v = stack.pop();
   void *p = reinterpret_cast<void*>(stack.pop());
   stack.push(reinterpret_cast<int32_t>(Belem(p, v)));
+}
+
+void interpreter::eval_barray() {
+  int32_t len = next_int();
+  stack.reverse(len, 0);
+  int32_t res = reinterpret_cast<int32_t>(Barray_my(box(len), stack.get_stack_bottom()));
+  stack.drop(len);
+  stack.push(res);
+}
+
+void interpreter::eval_sexp() {
+  char *name = next_str();
+  int32_t len = next_int();
+  int32_t tag = LtagHash(name);
+  // std::cerr << "SEXP: " << name << ' ' << tag << ' ' << len << ' ' << std::endl;
+  stack.reverse(len, 0);
+  int32_t res = reinterpret_cast<int32_t>(Bsexp_my(box(len+1), tag, stack.get_stack_bottom()));
+  stack.drop(len);
+  stack.push(res);
+}
+
+void interpreter::eval_dup() {
+  stack.fill(2, stack.pop());
+}
+
+void interpreter::eval_tag() {
+  char *name = next_str();
+  int32_t n  = next_int();
+  int32_t t  = LtagHash(name);
+  void *d    = reinterpret_cast<void*>(stack.pop());
+  stack.push(Btag(d, t, box(n)));
+  // std::cerr << name << ' ' << t << ' ' << n  << std::endl;
+}
+
+void interpreter::eval_lstring() {
+  stack.push(reinterpret_cast<int32_t>(Lstring(reinterpret_cast<void*>(stack.pop()))));
+}
+
+void interpreter::eval_lda(char l) {
+  stack.push(reinterpret_cast<int32_t>(get_by_location(l, next_int())));
+}
+
+void interpreter::eval_array() {
+  // std::cerr << "ARRAY " << std::endl;
+  int len = next_int();
+  // stack.reverse(len, 0);
+  int32_t res = Barray_patt(reinterpret_cast<int32_t*>(stack.pop()), box(len));
+  stack.push(res);
+}
+
+void interpreter::eval_fail() {
+  int32_t a = next_int();
+  int32_t b = next_int();
+  failure("Explicitly failed with FAIL %d %d", a, b);
+}
+
+void interpreter::eval_closure() {
+  int32_t shift = next_int();
+  int32_t n_binded = next_int();
+  int32_t binds[n_binded];
+  for (int i = 0; i < n_binded; i++) {
+    char l = next_char();
+    int value = next_int();
+    binds[i] = *get_by_location(l, value);
+  }
+  stack.push(reinterpret_cast<int32_t>(Bclosure_my(box(n_binded), bf->code_ptr + shift, binds)));
+}
+
+void interpreter::eval_patt(char l) {
+  // =str", "#string", "#array", "#sexp", "#ref", "#val", "#fun"}
+  int32_t* elem = reinterpret_cast<int32_t*>(stack.pop());
+  int32_t res;
+  switch (l) {
+    case 0:
+      res = Bstring_patt(elem, reinterpret_cast<int32_t*>(stack.pop()));
+      break;
+    case 1:
+      res = Bstring_tag_patt(elem);
+      break;
+    case 2:
+      res = Barray_tag_patt(elem);
+      break;
+    case 3:
+      res = Bsexp_tag_patt(elem);
+      break;
+    case 4:
+      res = Bboxed_patt(elem);
+      break;
+    case 5:
+      res = Bunboxed_patt(elem);
+      break;
+    case 6:
+      res = Bclosure_tag_patt(elem);
+      break;
+    default:
+      failure("Unexpected PATT");
+  }
+  return stack.push(res);
 }
 
 void interpreter::run() {
@@ -145,8 +282,6 @@ void interpreter::run() {
     auto fail = [h, l]() {
       failure ("ERROR: invalid opcode %d-%d\n", h, l);
     };
-
-    // fprintf (f, "0x%.8x:\t", ip-bf->code_ptr-1);
     
     switch (h) {
     case 15:
@@ -167,16 +302,16 @@ void interpreter::run() {
         break;
           
       case  2:
-        fprintf (f, "SEXP\t%s ", next_str());
-        fprintf (f, "%d", next_int());
+        eval_sexp();
         break;
         
       case  3:
-        fprintf (f, "STI");
+        // fprintf (f, "STI");
+        failure("STI instruction is deprecated");
         break;
         
       case  4:
-        fprintf (f, "STA");
+        eval_sta();
         break;
         
       case  5:
@@ -196,7 +331,7 @@ void interpreter::run() {
         break;
         
       case  9:
-        fprintf (f, "DUP");
+        eval_dup();
         break;
         
       case 10:
@@ -217,7 +352,7 @@ void interpreter::run() {
     case 4:
       switch (h - 2) {
         case 0: eval_ld(l); break;
-        case 1: fprintf(f, "LDA"); break;
+        case 1: eval_lda(l); break;
         case 2: eval_st(l); break;
       }
       break;
@@ -237,27 +372,15 @@ void interpreter::run() {
         break;
         
       case  3:
-        fprintf (f, "CBEGIN\t%d ", next_int());
-        fprintf (f, "%d", next_int());
+        eval_cbegin();
         break;
         
       case  4:
-        fprintf (f, "CLOSURE\t0x%.8x", next_int());
-        {int n = next_int();
-         for (int i = 0; i<n; i++) {
-         switch (next_char()) {
-           case 0: fprintf (f, "G(%d)", next_int()); break;
-           case 1: fprintf (f, "L(%d)", next_int()); break;
-           case 2: fprintf (f, "A(%d)", next_int()); break;
-           case 3: fprintf (f, "C(%d)", next_int()); break;
-           default: fail();
-         }
-         }
-        };
+        eval_closure();
         break;
           
       case  5:
-        fprintf (f, "CALLC\t%d", next_int());
+        eval_callc();
         break;
         
       case  6:
@@ -265,17 +388,15 @@ void interpreter::run() {
         break;
         
       case  7:
-        fprintf (f, "TAG\t%s ", next_str());
-        fprintf (f, "%d", next_int());
+        eval_tag();
         break;
         
       case  8:
-        fprintf (f, "ARRAY\t%d", next_int());
+        eval_array();
         break;
         
       case  9:
-        fprintf (f, "FAIL\t%d", next_int());
-        fprintf (f, "%d", next_int());
+        eval_fail();
         break;
         
       case 10:
@@ -288,7 +409,7 @@ void interpreter::run() {
       break;
       
     case 6:
-      fprintf (f, "PATT\t%s", pats[l]);
+      eval_patt(l);
       break;
 
     case 7: {
@@ -306,11 +427,11 @@ void interpreter::run() {
         break;
 
       case 3:
-        fprintf (f, "CALL\tLstring");
+        eval_lstring();
         break;
 
       case 4:
-        fprintf (f, "CALL\tBarray\t%d", next_int());
+        eval_barray();
         break;
 
       default:

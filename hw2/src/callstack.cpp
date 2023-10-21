@@ -3,12 +3,17 @@
 
 extern "C" {
   #include "runtime.h"
+  extern void* Belem_link (void *p, int i);
 }
 
 callstack::callstack(int32_t *&stack_top, int32_t *&stack_bottom): stack_top(stack_top), stack_bottom(stack_bottom) {    
-  stack_bottom = stack_top = (new int[1024]) + 1024;
+  stack_bottom = stack_top = (new int[1024000]) + 1024000;
   push(0);
 };
+
+int32_t* callstack::get_stack_bottom() {
+  return stack_bottom;
+}
 
 int32_t box(int32_t value) {
   return (value << 1) | 1;
@@ -26,21 +31,32 @@ int32_t callstack::pop() {
   return *(stack_bottom++);
 }
 
+int32_t callstack::nth(int n) {
+  return stack_bottom[n];
+}
+
 void callstack::drop(int n) {
   stack_bottom += n;
 }
 
-void callstack::reserve(int n) {
+void callstack::fill(int n, int32_t value) {
   for (int i = 0; i < n; i++) {
-    push(box(0));
+    push(value);
+  }
+}
+
+void callstack::reverse(int n, int skip) {
+  int32_t *st = stack_bottom + skip; // Point to last element
+  int32_t *first_arg = st + n - 1; // Points to first argument
+  while (st < first_arg) {
+    std::swap(*(st++), *(first_arg--));
   }
 }
 
 void callstack::prologue(int32_t nlocals, int32_t nargs) {
-  push(nargs);
   push(reinterpret_cast<int32_t>(fp));
   fp = stack_bottom;
-  reserve(nlocals);
+  fill(nlocals, box(0));
 }
 
 char* callstack::epilogue() {
@@ -56,19 +72,30 @@ char* callstack::epilogue() {
   return ra;
 }
 
-int32_t& callstack::local(int pos) {
-  return fp[-pos - 1];
+int32_t* callstack::get_current_closure() {
+  int32_t nargs = *(fp + 1);
+  // std::cerr << "!! " << nargs << std::endl;
+  return reinterpret_cast<int32_t*>(*arg(nargs - 1));
 }
 
-int32_t& callstack::arg(int pos) {
-  return fp[pos + 3];
+int32_t* callstack::local(int pos) {
+  return fp - pos - 1;
+}
+
+int32_t* callstack::arg(int pos) {
+  return fp + pos + 3;
+}
+
+int32_t* callstack::closure_binded(int pos) {
+  int32_t *closure = get_current_closure();
+  return reinterpret_cast<int32_t*>(Belem_link(closure, box(pos + 1)));
 }
 
 void callstack::binop(int opcode) {
   int32_t rhv = unbox(pop());
   int32_t lhv = unbox(pop());
   int32_t result;
-  switch(opcode) {
+  switch (opcode) {
     case 1:
       result = lhv + rhv;
       break;

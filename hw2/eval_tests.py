@@ -9,6 +9,9 @@ logs_dir = './logs'
 tests_total = 0
 tests_success = 0
 
+if not os.path.exists(logs_dir):
+    os.makedirs(logs_dir)
+
 for test_dir in test_dirs:
     cur_test_dir = os.path.join(base_test_dir, test_dir)
     basic_tests = sorted([os.path.splitext(f)[0] for f in os.listdir(cur_test_dir) if f.endswith('.lama')])

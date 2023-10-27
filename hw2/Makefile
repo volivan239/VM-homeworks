@@ -23,4 +23,4 @@ build:
 	mkdir build
 
 clean:
-	$(RM) -r *.a *.o *~ build
+	$(RM) -r *.a *.o *~ build *.bc logs

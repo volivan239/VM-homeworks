@@ -134,7 +134,7 @@ void interpreter::eval_cjmp_z() {
 void interpreter::eval_call() {
   int32_t shift = next_int();
   int32_t nargs = next_int();
-  stack.reverse(nargs, 0);
+  stack.reverse(nargs);
   stack.push(reinterpret_cast<int32_t>(ip));
   stack.push(nargs);
   ip = bf->code_ptr + shift;
@@ -143,7 +143,7 @@ void interpreter::eval_call() {
 void interpreter::eval_callc() {
   int32_t nargs = next_int();
   char* callee = reinterpret_cast<char*>(Belem(reinterpret_cast<int32_t*>(stack.nth(nargs)), box(0)));
-  stack.reverse(nargs, 0);
+  stack.reverse(nargs);
   stack.push(reinterpret_cast<int32_t>(ip));
   stack.push(nargs + 1);
   ip = callee;
@@ -160,12 +160,15 @@ void interpreter::eval_length() {
 void interpreter::eval_sta() {
   void *v = reinterpret_cast<void*>(stack.pop());
   int32_t i = stack.pop();
-  void *x = reinterpret_cast<void*>(stack.pop());
-  stack.push(reinterpret_cast<int32_t>(Bsta(v, i, x)));
+  if (is_boxed(i)) {   
+    void *x = reinterpret_cast<void*>(stack.pop());
+    stack.push(reinterpret_cast<int32_t>(Bsta(v, i, x))); 
+  } else {
+    stack.push(reinterpret_cast<int32_t>(Bsta(v, i, nullptr)));
+  }
 }
 
 void interpreter::eval_elem() {
-  // std::cerr << "ELEM" << std::endl;
   int32_t v = stack.pop();
   void *p = reinterpret_cast<void*>(stack.pop());
   stack.push(reinterpret_cast<int32_t>(Belem(p, v)));
@@ -173,7 +176,7 @@ void interpreter::eval_elem() {
 
 void interpreter::eval_barray() {
   int32_t len = next_int();
-  stack.reverse(len, 0);
+  stack.reverse(len);
   int32_t res = reinterpret_cast<int32_t>(Barray_my(box(len), stack.get_stack_bottom()));
   stack.drop(len);
   stack.push(res);
@@ -183,8 +186,7 @@ void interpreter::eval_sexp() {
   char *name = next_str();
   int32_t len = next_int();
   int32_t tag = LtagHash(name);
-  // std::cerr << "SEXP: " << name << ' ' << tag << ' ' << len << ' ' << std::endl;
-  stack.reverse(len, 0);
+  stack.reverse(len);
   int32_t res = reinterpret_cast<int32_t>(Bsexp_my(box(len+1), tag, stack.get_stack_bottom()));
   stack.drop(len);
   stack.push(res);
@@ -200,7 +202,6 @@ void interpreter::eval_tag() {
   int32_t t  = LtagHash(name);
   void *d    = reinterpret_cast<void*>(stack.pop());
   stack.push(Btag(d, t, box(n)));
-  // std::cerr << name << ' ' << t << ' ' << n  << std::endl;
 }
 
 void interpreter::eval_lstring() {
@@ -212,9 +213,7 @@ void interpreter::eval_lda(char l) {
 }
 
 void interpreter::eval_array() {
-  // std::cerr << "ARRAY " << std::endl;
   int len = next_int();
-  // stack.reverse(len, 0);
   int32_t res = Barray_patt(reinterpret_cast<int32_t*>(stack.pop()), box(len));
   stack.push(res);
 }
@@ -238,7 +237,6 @@ void interpreter::eval_closure() {
 }
 
 void interpreter::eval_patt(char l) {
-  // =str", "#string", "#array", "#sexp", "#ref", "#val", "#fun"}
   int32_t* elem = reinterpret_cast<int32_t*>(stack.pop());
   int32_t res;
   switch (l) {
@@ -273,8 +271,6 @@ void interpreter::run() {
   FILE *f = stderr;
 
   do {
-    // std::cerr << stack.len() << std::endl;
-    // fflush(f);
     char x = next_char(),
          h = (x & 0xF0) >> 4,
          l = x & 0x0F;
@@ -306,7 +302,6 @@ void interpreter::run() {
         break;
         
       case  3:
-        // fprintf (f, "STI");
         failure("STI instruction is deprecated");
         break;
         
@@ -323,7 +318,7 @@ void interpreter::run() {
         break;
         
       case  7:
-        fprintf (f, "RET");
+        failure("behaviour of RET is undefined");
         break;
         
       case  8:
@@ -335,7 +330,7 @@ void interpreter::run() {
         break;
         
       case 10:
-        fprintf (f, "SWAP");
+        failure("behaviour of SWAP is undefined");
         break;
 
       case 11:
@@ -443,9 +438,6 @@ void interpreter::run() {
     default:
       fail();
     }
-
-    // fprintf (f, "\n");
   }
   while (ip != nullptr);
-  fprintf (f, "<end>\n");
 }

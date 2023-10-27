@@ -6,10 +6,18 @@ extern "C" {
   extern void* Belem_link (void *p, int i);
 }
 
+const int MAX_STACK_SIZE = 1024 * 1024;
+
 callstack::callstack(int32_t *&stack_top, int32_t *&stack_bottom): stack_top(stack_top), stack_bottom(stack_bottom) {    
-  stack_bottom = stack_top = (new int[1024000]) + 1024000;
-  push(0);
+  fp = stack_bottom = stack_top = (new int[MAX_STACK_SIZE]) + MAX_STACK_SIZE;
+  push(0); // fake argv
+  push(0); // fake argc
+  push(2);
 };
+
+callstack::~callstack() {
+  delete[] (stack_top - MAX_STACK_SIZE);
+}
 
 int32_t* callstack::get_stack_bottom() {
   return stack_bottom;
@@ -23,12 +31,21 @@ int32_t unbox(int32_t value) {
   return value >> 1;
 }
 
+bool is_boxed(int32_t value) {
+  return value & 1;
+}
+
 void callstack::push(int32_t value) {
   *(--stack_bottom) = value;
 }
 
-int32_t callstack::pop() {
+int32_t callstack::pop_unchecked() {
   return *(stack_bottom++);
+}
+
+int32_t callstack::pop() {
+  assert(stack_bottom < fp);
+  return pop_unchecked();
 }
 
 int32_t callstack::nth(int n) {
@@ -45,8 +62,8 @@ void callstack::fill(int n, int32_t value) {
   }
 }
 
-void callstack::reverse(int n, int skip) {
-  int32_t *st = stack_bottom + skip; // Point to last element
+void callstack::reverse(int n) {
+  int32_t *st = stack_bottom; // Point to last element
   int32_t *first_arg = st + n - 1; // Points to first argument
   while (st < first_arg) {
     std::swap(*(st++), *(first_arg--));
@@ -60,21 +77,18 @@ void callstack::prologue(int32_t nlocals, int32_t nargs) {
 }
 
 char* callstack::epilogue() {
-  // std::cerr << stack_bottom << ' ' << stack_top << std::endl;
   int32_t rv = pop();
   stack_bottom = fp;
-  fp = reinterpret_cast<int32_t*>(pop());
+  fp = reinterpret_cast<int32_t*>(pop_unchecked());
   int32_t nargs = pop();
   char *ra = reinterpret_cast<char*>(pop());
   drop(nargs);
   push(rv);
-  //std::cerr << rv << ' ' << ra << std::endl;
   return ra;
 }
 
 int32_t* callstack::get_current_closure() {
   int32_t nargs = *(fp + 1);
-  // std::cerr << "!! " << nargs << std::endl;
   return reinterpret_cast<int32_t*>(*arg(nargs - 1));
 }
 

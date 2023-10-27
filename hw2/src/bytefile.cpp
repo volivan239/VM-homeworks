@@ -1,5 +1,3 @@
-/* Lama SM Bytecode interpreter */
-
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
@@ -10,22 +8,18 @@ const char *ops [] = {"+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!=",
 const char *pats[] = {"=str", "#string", "#array", "#sexp", "#ref", "#val", "#fun"};
 const char *lds [] = {"LD", "LDA", "ST"};
 
-/* Gets a string from a string table by an index */
 char* bytefile::get_string( int pos) {
   return &string_ptr[pos];
 }
 
-/* Gets a name for a public symbol */
 char* bytefile::get_public_name(int i) {
   return get_string(public_ptr[i*2]);
 }
 
-/* Gets an offset for a publie symbol */
 int bytefile::get_public_offset(int i) {
   return public_ptr[i*2+1];
 }
 
-/* Reads a binary bytecode file by name and unpacks it */
 bytefile::bytefile(char *fname) {
   FILE *f = fopen (fname, "rb");
 
@@ -39,7 +33,6 @@ bytefile::bytefile(char *fname) {
 
   size_t size = ftell(f) - 3 * sizeof(int32_t);
   buffer = new char[size];
-  //file = (bytefile*) malloc (sizeof(int)*4 + (size = ftell (f)));
 
   if (buffer == 0) {
     failure ("*** FAILURE: unable to allocate memory.\n");

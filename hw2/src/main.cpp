@@ -1,4 +1,3 @@
-/* Lama SM Bytecode interpreter */
 #include "interpreter.h"
 
 extern "C" {

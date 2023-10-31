@@ -1,14 +1,11 @@
-all: build/main.o build/gc_runtime.o build/bytefile.o build/runtime.o build/callstack.o build/interpreter.o
-	$(CXX) -g -m32 build/gc_runtime.o build/runtime.o build/bytefile.o build/callstack.o build/interpreter.o build/main.o -o build/interpreter
+all: build/main.o build/gc_runtime.o build/bytefile.o build/runtime.o build/interpreter.o
+	$(CXX) -g -m32 build/gc_runtime.o build/runtime.o build/bytefile.o build/interpreter.o build/main.o -o build/interpreter
 
-build/main.o: build src/main.cpp src/include/interpreter.h src/include/runtime.h src/include/bytefile.h src/include/callstack.h
+build/main.o: build src/main.cpp src/include/interpreter.h src/include/runtime.h src/include/bytefile.h
 	$(CXX) -O2 -I src/include -g -fstack-protector-all -m32 -c src/main.cpp -o build/main.o
 
-build/interpreter.o: build src/interpreter.cpp src/include/interpreter.h src/include/callstack.h src/include/bytefile.h
+build/interpreter.o: build src/interpreter.cpp src/include/interpreter.h src/include/bytefile.h
 	$(CXX) -O2 -I src/include -g -fstack-protector-all -m32 -c src/interpreter.cpp -o build/interpreter.o
-
-build/callstack.o: build src/callstack.cpp src/include/callstack.h
-	$(CXX) -O2 -I src/include -g -fstack-protector-all -m32 -c src/callstack.cpp -o build/callstack.o
 
 build/bytefile.o: build src/bytefile.cpp src/include/bytefile.h
 	$(CXX) -O2 -I src/include -g -fstack-protector-all -m32 -c src/bytefile.cpp -o build/bytefile.o

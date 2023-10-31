@@ -1,15 +1,34 @@
 # ifndef __INTERPRETER_STATE_H__
 # define __INTERPRETER_STATE_H__
 #include "bytefile.h"
-#include "callstack.h"
+// #include "callstack.h"
 
 class interpreter {
 private:
+  int32_t *&stack_top;
+  int32_t *&stack_bottom;
+  int32_t *fp;
+
   bytefile *bf;
-  callstack stack;
+  // callstack stack;
   char *ip;
 
 private:
+  int32_t *get_stack_bottom();
+  void push(int32_t value);
+  int32_t pop_unchecked();
+  int32_t pop();
+  int32_t nth(int n);
+  void drop(int n);
+  void fill(int n, int32_t value);
+  void reverse(int n);
+  void prologue(int32_t nlocals, int32_t nargs);
+  char *epilogue();
+  int32_t *get_current_closure();
+  int32_t *local(int pos);
+  int32_t *arg(int pos);
+  int32_t *closure_binded(int pos);
+
   int32_t next_int();
   char next_char();
   char* next_str();
@@ -52,6 +71,7 @@ private:
 
   public:
   interpreter(bytefile *bf, int32_t *&stack_top, int32_t *&stack_bottom);
+  ~interpreter();
 
   void run();
 };

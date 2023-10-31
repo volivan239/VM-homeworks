@@ -26,8 +26,112 @@ extern "C" {
   extern int Bclosure_tag_patt (void *x);
 }
 
+const int MAX_STACK_SIZE = 1024 * 1024;
+
 interpreter::interpreter(bytefile *bf, int32_t *&stack_top, int32_t *&stack_bottom):
-  bf(bf), stack(callstack(stack_top, stack_bottom)), ip(bf->code_ptr) {}
+  bf(bf), stack_top(stack_top), stack_bottom(stack_bottom), ip(bf->code_ptr) {
+
+  fp = stack_bottom = stack_top = (new int[MAX_STACK_SIZE]) + MAX_STACK_SIZE;
+  push(0); // fake argv
+  push(0); // fake argc
+  push(2);
+}
+
+
+int32_t* interpreter::get_stack_bottom() {
+  return stack_bottom;
+}
+
+int32_t box(int32_t value) {
+  return (value << 1) | 1;
+}
+
+int32_t unbox(int32_t value) {
+  return value >> 1;
+}
+
+bool is_boxed(int32_t value) {
+  return value & 1;
+}
+
+void interpreter::push(int32_t value) {
+  if (stack_bottom == stack_top - MAX_STACK_SIZE) {
+    failure("Stack limit exceeded");
+  }
+  *(--stack_bottom) = value;
+}
+
+int32_t interpreter::pop_unchecked() {
+  return *(stack_bottom++);
+}
+
+int32_t interpreter::pop() {
+  if (stack_bottom >= fp) {
+    failure("Illegal pop occured");
+  }
+  return pop_unchecked();
+}
+
+int32_t interpreter::nth(int n) {
+  return stack_bottom[n];
+}
+
+void interpreter::drop(int n) {
+  stack_bottom += n;
+}
+
+void interpreter::fill(int n, int32_t value) {
+  for (int i = 0; i < n; i++) {
+    push(value);
+  }
+}
+
+void interpreter::reverse(int n) {
+  int32_t *st = stack_bottom; // Point to last element
+  int32_t *first_arg = st + n - 1; // Points to first argument
+  while (st < first_arg) {
+    std::swap(*(st++), *(first_arg--));
+  }
+}
+
+void interpreter::prologue(int32_t nlocals, int32_t nargs) {
+  push(reinterpret_cast<int32_t>(fp));
+  fp = stack_bottom;
+  fill(nlocals, box(0));
+}
+
+char* interpreter::epilogue() {
+  int32_t rv = pop();
+  stack_bottom = fp;
+  fp = reinterpret_cast<int32_t*>(pop_unchecked());
+  int32_t nargs = pop();
+  char *ra = reinterpret_cast<char*>(pop());
+  drop(nargs);
+  push(rv);
+  return ra;
+}
+
+int32_t* interpreter::get_current_closure() {
+  int32_t nargs = *(fp + 1);
+  return reinterpret_cast<int32_t*>(*arg(nargs - 1));
+}
+
+int32_t* interpreter::local(int pos) {
+  return fp - pos - 1;
+}
+
+int32_t* interpreter::arg(int pos) {
+  return fp + pos + 3;
+}
+
+int32_t* interpreter::closure_binded(int pos) {
+  int32_t *closure = get_current_closure();
+  return reinterpret_cast<int32_t*>(Belem_link(closure, box(pos + 1)));
+}
+
+interpreter::~interpreter() {
+  delete[] (stack_top - MAX_STACK_SIZE);
+}
 
 int32_t interpreter::next_int() {
   int32_t result = *reinterpret_cast<int32_t*>(ip);
@@ -51,9 +155,9 @@ int32_t* interpreter::global(int32_t pos) {
 int32_t* interpreter::get_by_location(char l, int32_t value) {
   switch (l) {
     case 0: return global(value);
-    case 1: return stack.local(value);
-    case 2: return stack.arg(value);
-    case 3: return stack.closure_binded(value);
+    case 1: return local(value);
+    case 2: return arg(value);
+    case 3: return closure_binded(value);
     default: inst_decode_failure();
   }
 }
@@ -63,38 +167,84 @@ void interpreter::inst_decode_failure() {
 }
 
 void interpreter::eval_binop(char l) {
-  stack.binop(l);
+  int32_t rhv = unbox(pop());
+  int32_t lhv = unbox(pop());
+  int32_t result;
+  switch (l) {
+    case 1:
+      result = lhv + rhv;
+      break;
+    case 2:
+      result = lhv - rhv;
+      break;
+    case 3:
+      result = lhv * rhv;
+      break;
+    case 4:
+      result = lhv / rhv;
+      break;
+    case 5:
+      result = lhv % rhv;
+      break;
+    case 6:
+      result = lhv < rhv;
+      break;
+    case 7:
+      result = lhv <= rhv;
+      break;
+    case 8:
+      result = lhv > rhv;
+      break;
+    case 9:
+      result = lhv >= rhv;
+      break;
+    case 10:
+      result = lhv == rhv;
+      break;
+    case 11:
+      result = lhv != rhv;
+      break;
+    case 12:
+      result = lhv && rhv;
+      break;
+    case 13:
+      result = lhv || rhv;
+      break;
+    default:
+      failure("Unexpected binary operation code: %d", l);
+  }
+  push(box(result));
 }
 
 void interpreter::eval_const() {
-  stack.push(box(next_int()));
+  push(box(next_int()));
 }
 
 void interpreter::eval_end() {
-  ip = stack.epilogue();
+  ip = epilogue();
 }
 
 void interpreter::eval_drop() {
-  stack.pop();
+  pop();
 }
 
 void interpreter::eval_st(char l) {
   int32_t ind = next_int();
-  int32_t value = stack.pop();
+  int32_t value = pop();
   *get_by_location(l, ind) = value;
-  stack.push(value);
+  push(value);
 }
 
 void interpreter::eval_ld(char l) {
   int32_t ind = next_int();
   int32_t value = *get_by_location(l, ind);
-  stack.push(value);
+  push(value);
 }
 
 void interpreter::eval_begin() {
   int nargs = next_int();
   int nlocals = next_int();
-  stack.prologue(nlocals, nargs);
+  prologue(nlocals, nargs);
 }
 
 void interpreter::eval_cbegin() {
@@ -102,11 +252,11 @@ void interpreter::eval_cbegin() {
 }
 
 void interpreter::eval_read() {
-  stack.push(Lread());
+  push(Lread());
 }
 
 void interpreter::eval_write() {
-  stack.push(Lwrite(stack.pop()));
+  push(Lwrite(pop()));
 }
 
 void interpreter::eval_line() {
@@ -119,14 +269,14 @@ void interpreter::eval_jmp() {
 
 void interpreter::eval_cjmp_nz() {
   int32_t shift = next_int();
-  if (unbox(stack.pop()) != 0) {
+  if (unbox(pop()) != 0) {
     ip = bf->code_ptr + shift;
   }
 }
 
 void interpreter::eval_cjmp_z() {
   int32_t shift = next_int();
-  if (unbox(stack.pop()) == 0) {
+  if (unbox(pop()) == 0) {
     ip = bf->code_ptr + shift;
   }
 }
@@ -134,88 +284,88 @@ void interpreter::eval_cjmp_z() {
 void interpreter::eval_call() {
   int32_t shift = next_int();
   int32_t nargs = next_int();
-  stack.reverse(nargs);
-  stack.push(reinterpret_cast<int32_t>(ip));
-  stack.push(nargs);
+  reverse(nargs);
+  push(reinterpret_cast<int32_t>(ip));
+  push(nargs);
   ip = bf->code_ptr + shift;
 }
 
 void interpreter::eval_callc() {
   int32_t nargs = next_int();
-  char* callee = reinterpret_cast<char*>(Belem(reinterpret_cast<int32_t*>(stack.nth(nargs)), box(0)));
-  stack.reverse(nargs);
-  stack.push(reinterpret_cast<int32_t>(ip));
-  stack.push(nargs + 1);
+  char* callee = reinterpret_cast<char*>(Belem(reinterpret_cast<int32_t*>(nth(nargs)), box(0)));
+  reverse(nargs);
+  push(reinterpret_cast<int32_t>(ip));
+  push(nargs + 1);
   ip = callee;
 }
 
 void interpreter::eval_string() {
-  stack.push(reinterpret_cast<int32_t>(Bstring(bf->string_ptr + next_int())));
+  push(reinterpret_cast<int32_t>(Bstring(bf->string_ptr + next_int())));
 }
 
 void interpreter::eval_length() {
-  stack.push(Llength(reinterpret_cast<void*>(stack.pop())));
+  push(Llength(reinterpret_cast<void*>(pop())));
 }
 
 void interpreter::eval_sta() {
-  void *v = reinterpret_cast<void*>(stack.pop());
-  int32_t i = stack.pop();
+  void *v = reinterpret_cast<void*>(pop());
+  int32_t i = pop();
   if (is_boxed(i)) {   
-    void *x = reinterpret_cast<void*>(stack.pop());
-    stack.push(reinterpret_cast<int32_t>(Bsta(v, i, x))); 
+    void *x = reinterpret_cast<void*>(pop());
+    push(reinterpret_cast<int32_t>(Bsta(v, i, x))); 
   } else {
-    stack.push(reinterpret_cast<int32_t>(Bsta(v, i, nullptr)));
+    push(reinterpret_cast<int32_t>(Bsta(v, i, nullptr)));
   }
 }
 
 void interpreter::eval_elem() {
-  int32_t v = stack.pop();
-  void *p = reinterpret_cast<void*>(stack.pop());
-  stack.push(reinterpret_cast<int32_t>(Belem(p, v)));
+  int32_t v = pop();
+  void *p = reinterpret_cast<void*>(pop());
+  push(reinterpret_cast<int32_t>(Belem(p, v)));
 }
 
 void interpreter::eval_barray() {
   int32_t len = next_int();
-  stack.reverse(len);
-  int32_t res = reinterpret_cast<int32_t>(Barray_my(box(len), stack.get_stack_bottom()));
-  stack.drop(len);
-  stack.push(res);
+  reverse(len);
+  int32_t res = reinterpret_cast<int32_t>(Barray_my(box(len), get_stack_bottom()));
+  drop(len);
+  push(res);
 }
 
 void interpreter::eval_sexp() {
   char *name = next_str();
   int32_t len = next_int();
   int32_t tag = LtagHash(name);
-  stack.reverse(len);
-  int32_t res = reinterpret_cast<int32_t>(Bsexp_my(box(len+1), tag, stack.get_stack_bottom()));
-  stack.drop(len);
-  stack.push(res);
+  reverse(len);
+  int32_t res = reinterpret_cast<int32_t>(Bsexp_my(box(len+1), tag, get_stack_bottom()));
+  drop(len);
+  push(res);
 }
 
 void interpreter::eval_dup() {
-  stack.fill(2, stack.pop());
+  fill(2, pop());
 }
 
 void interpreter::eval_tag() {
   char *name = next_str();
   int32_t n  = next_int();
   int32_t t  = LtagHash(name);
-  void *d    = reinterpret_cast<void*>(stack.pop());
-  stack.push(Btag(d, t, box(n)));
+  void *d    = reinterpret_cast<void*>(pop());
+  push(Btag(d, t, box(n)));
 }
 
 void interpreter::eval_lstring() {
-  stack.push(reinterpret_cast<int32_t>(Lstring(reinterpret_cast<void*>(stack.pop()))));
+  push(reinterpret_cast<int32_t>(Lstring(reinterpret_cast<void*>(pop()))));
 }
 
 void interpreter::eval_lda(char l) {
-  stack.push(reinterpret_cast<int32_t>(get_by_location(l, next_int())));
+  push(reinterpret_cast<int32_t>(get_by_location(l, next_int())));
 }
 
 void interpreter::eval_array() {
   int len = next_int();
-  int32_t res = Barray_patt(reinterpret_cast<int32_t*>(stack.pop()), box(len));
-  stack.push(res);
+  int32_t res = Barray_patt(reinterpret_cast<int32_t*>(pop()), box(len));
+  push(res);
 }
 
 void interpreter::eval_fail() {
@@ -233,15 +383,15 @@ void interpreter::eval_closure() {
     int value = next_int();
     binds[i] = *get_by_location(l, value);
   }
-  stack.push(reinterpret_cast<int32_t>(Bclosure_my(box(n_binded), bf->code_ptr + shift, binds)));
+  push(reinterpret_cast<int32_t>(Bclosure_my(box(n_binded), bf->code_ptr + shift, binds)));
 }
 
 void interpreter::eval_patt(char l) {
-  int32_t* elem = reinterpret_cast<int32_t*>(stack.pop());
+  int32_t* elem = reinterpret_cast<int32_t*>(pop());
   int32_t res;
   switch (l) {
     case 0:
-      res = Bstring_patt(elem, reinterpret_cast<int32_t*>(stack.pop()));
+      res = Bstring_patt(elem, reinterpret_cast<int32_t*>(pop()));
       break;
     case 1:
       res = Bstring_tag_patt(elem);
@@ -264,7 +414,7 @@ void interpreter::eval_patt(char l) {
     default:
       failure("Unexpected PATT");
   }
-  return stack.push(res);
+  return push(res);
 }
 
 void interpreter::run() {

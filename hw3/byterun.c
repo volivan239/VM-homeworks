@@ -4,8 +4,22 @@
 # include <errno.h>
 # include <malloc.h>
 # include <stdbool.h>
-# include "runtime.h"
+# include <stdlib.h>
+# include <stdarg.h>
 # include "byterun.h"
+
+static void vfailure (char *s, va_list args) {
+  fprintf(stderr, "*** FAILURE: ");
+  vfprintf(stderr, s, args);   // vprintf (char *, va_list) <-> printf (char *, ...)
+  exit(255);
+}
+
+void failure (char *s, ...) {
+  va_list args;
+
+  va_start(args, s);
+  vfailure(s, args);
+}
 
 /* Gets a string from a string table by an index */
 char* get_string (bytefile *f, int pos) {
@@ -39,7 +53,7 @@ bytefile* read_file (char *fname) {
   file = (bytefile*) malloc (sizeof(int)*4 + (size = ftell (f)));
 
   if (file == 0) {
-    failure ("*** FAILURE: unable to allocate memory.\n");
+    failure ("unable to allocate memory.\n");
   }
   
   rewind (f);

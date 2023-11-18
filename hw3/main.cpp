@@ -7,9 +7,6 @@ extern "C" {
     #include "byterun.h"
 }
 
-void *__start_custom_data;
-void *__stop_custom_data;
-
 struct code_instruction {
     char *ptr;
     int len;

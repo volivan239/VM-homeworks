@@ -2,17 +2,18 @@
 #include <unordered_map>
 #include <vector>
 #include <algorithm>
+#include <iostream>
 
 extern "C" {
     #include "byterun.h"
 }
 
 struct code_instruction {
-    char *ptr;
+    const char *ptr;
     int len;
 
     code_instruction() {}
-    code_instruction(char *ptr, int len): ptr(ptr), len(len) {}
+    code_instruction(const char *ptr, int len): ptr(ptr), len(len) {}
 
     bool operator == (const code_instruction &other) const {
         return len == other.len && !memcmp(ptr, other.ptr, len);
@@ -30,14 +31,14 @@ struct std::hash<code_instruction> {
     }
 };
 
-void eval_counter(FILE *f, FILE *dump, bytefile *bf) {
+void eval_counter(FILE *f, bytefile *bf) {
     std::unordered_map<code_instruction, int> counter;
-    char *ip = bf->code_ptr;
-    char *old_value = ip;
+    const char *ip = bf->code_ptr;
 
-    while (disassemble_one_instruction(dump, bf, &ip)) {
-        ++counter[code_instruction(old_value, ip - old_value)];
-        old_value = ip;
+    while (ip < bf->code_ptr + bf->bytecode_size) {
+        const char *new_ip = disassemble_one_instruction(nullptr, bf, ip);
+        ++counter[code_instruction(ip, new_ip - ip)];
+        ip = new_ip;
     }
 
     std::vector<std::pair<code_instruction, int>> counter_sorted;
@@ -50,16 +51,15 @@ void eval_counter(FILE *f, FILE *dump, bytefile *bf) {
 
     fprintf(f, "Results of frequency analysis:\n");
     for (auto const &[code_instruction, cnt] : counter_sorted) {
-        char *ip = code_instruction.ptr;
+        const char *ip = code_instruction.ptr;
         fprintf(f, "%d times: \"", cnt);
-        disassemble_one_instruction(f, bf, &ip);
+        disassemble_one_instruction(f, bf, ip);
         fprintf(f, "\"\n");
     }
 }
 
 int main(int argc, char* argv[]) {
     bytefile *f = read_file (argv[1]);
-    FILE *dump = fopen("/dev/null", "w");
-    eval_counter(stdout, dump, f);
+    eval_counter(stdout, f);
     return 0;
 }
